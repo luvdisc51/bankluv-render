@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BankLuv Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell manager-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">BL</span>
+          <div>
+            <h1>BankLuv</h1>
+            <p>Manager app</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="App links">
+          <a class="nav-button active" href="/manager">Manager</a>
+          <a class="nav-button" href="/checkout">Checkout</a>
+          <a class="nav-button" href="/customer">Customer</a>
+        </nav>
+
+        <section class="quick-stats" aria-label="Bank summary">
+          <div><span>Total accounts</span><strong id="statAccounts">0</strong></div>
+          <div><span>Active cards</span><strong id="statCards">0</strong></div>
+          <div><span>Transactions</span><strong id="statTransactions">0</strong></div>
+        </section>
+      </aside>
+
+      <main>
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">Simulation mode</p>
+            <h2>Bank Manager</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button hidden" id="lockManager" type="button">Lock</button>
+            <button class="ghost-button hidden" id="resetDemo" type="button">Reset Demo</button>
+          </div>
+        </section>
+
+        <section class="panel login-panel" id="managerLoginPanel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Manager access</p>
+              <h3>Login</h3>
+            </div>
+          </div>
+          <form id="managerLoginForm" class="form-stack">
+            <label>
+              Manager password
+              <input name="password" required type="password" autocomplete="current-password" />
+            </label>
+            <button class="primary-button" type="submit">Unlock Manager</button>
+          </form>
+          <p class="helper-text">Default manager password: <strong>manager</strong></p>
+          <p id="managerLoginMessage" class="status-message" role="status"></p>
+        </section>
+
+        <section id="managerApp" class="hidden">
+          <div class="screen-grid manager-grid">
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Accounts</p>
+                  <h3>Create Account</h3>
+                </div>
+              </div>
+              <form id="accountForm" class="form-stack">
+                <label>Customer name<input name="ownerName" required placeholder="Jamie Rivera" /></label>
+                <div class="two-col">
+                  <label>Login username<input name="username" required placeholder="jamie" /></label>
+                  <label>Login password<input name="password" required placeholder="luv123" /></label>
+                </div>
+                <label>Starting balance<input name="balance" required type="number" min="0" step="0.01" value="250.00" /></label>
+                <button class="primary-button" type="submit">Create Account</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Cards</p>
+                  <h3>Create Card</h3>
+                </div>
+              </div>
+              <form id="cardForm" class="form-stack">
+                <label>Account<select name="accountId" id="cardAccountSelect" required></select></label>
+                <div class="two-col">
+                  <label>
+                    Card type
+                    <select name="type" id="cardType">
+                      <option value="debit">Debit</option>
+                      <option value="credit">Credit</option>
+                    </select>
+                  </label>
+                  <label>PIN<input name="pin" id="pinInput" inputmode="numeric" maxlength="6" placeholder="1234" /></label>
+                </div>
+                <label id="creditLimitLabel" class="hidden">Credit limit<input name="creditLimit" type="number" min="1" step="0.01" value="1000.00" /></label>
+                <button class="primary-button" type="submit">Create Card</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Gift Cards</p>
+                  <h3>Batch Create</h3>
+                </div>
+              </div>
+              <form id="giftCardForm" class="form-stack">
+                <label>Starting name<input name="giftCardName" required value="Gift Card #1" /></label>
+                <div class="two-col">
+                  <label>How many more<input name="giftCardCount" required type="number" min="1" step="1" value="1" /></label>
+                  <label>Starting balance<input name="giftCardBalance" required type="number" min="0" step="0.01" value="0.00" /></label>
+                </div>
+                <button class="primary-button" type="submit">Create Gift Cards</button>
+              </form>
+              <p id="giftCardMessage" class="status-message" role="status"></p>
+            </section>
+
+            <section class="panel compact-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Passwords</p>
+                  <h3>App Passwords</h3>
+                </div>
+              </div>
+              <form id="passwordForm" class="form-stack">
+                <label>Manager password<input name="managerPassword" required type="password" /></label>
+                <label>Checkout password<input name="checkoutPassword" required type="password" /></label>
+                <button class="primary-button" type="submit">Save Passwords</button>
+              </form>
+              <p id="passwordMessage" class="status-message" role="status"></p>
+            </section>
+
+            <section class="panel list-panel wide manager-accounts-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Manager Controls</p>
+                  <h3>Accounts & Cards</h3>
+                </div>
+              </div>
+              <div id="managerAccounts" class="record-list"></div>
+            </section>
+
+            <section class="panel list-panel credit-bills-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Credit Bills</p>
+                  <h3>Manual Billing</h3>
+                </div>
+                <button class="primary-button" id="payAllBills" type="button">Pay All Credit Card Bills</button>
+              </div>
+              <div id="billList" class="record-list compact"></div>
+            </section>
+
+            <section class="panel list-panel wide">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Recurring Charges</p>
+                  <h3>Subscriptions</h3>
+                </div>
+              </div>
+              <form id="subscriptionForm" class="item-form subscription-form">
+                <input name="name" required placeholder="Subscription name" />
+                <input name="amount" required type="number" min="0.01" step="0.01" placeholder="Amount" />
+                <select name="cardId" id="subscriptionCardSelect" required></select>
+                <button class="primary-button" type="submit">Add</button>
+              </form>
+              <div id="subscriptionList" class="record-list compact"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="manager.js"></script>
+  </body>
+</html>

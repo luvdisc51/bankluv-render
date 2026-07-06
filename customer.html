@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BankLuv Customer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="customer-app">
+    <main class="customer-shell">
+      <header class="customer-hero">
+        <div class="brand">
+          <span class="brand-mark">BL</span>
+          <div>
+            <h1>BankLuv</h1>
+            <p>Customer portal</p>
+          </div>
+        </div>
+        <button class="ghost-button hidden" id="logoutButton" type="button">Logout</button>
+      </header>
+
+      <section class="panel login-panel" id="loginPanel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Secure-ish fake banking</p>
+            <h3>Login</h3>
+          </div>
+        </div>
+        <form id="loginForm" class="form-stack">
+          <label>
+            Username
+            <input
+              name="username"
+              required
+              autocomplete="username"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              name="password"
+              required
+              type="password"
+              autocomplete="current-password"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck="false"
+            />
+          </label>
+          <button class="primary-button" type="submit">Login</button>
+        </form>
+        <p class="helper-text">Use the customer username and password created in the manager app.</p>
+        <p id="loginMessage" class="status-message" role="status"></p>
+      </section>
+
+      <section class="panel customer-panel hidden" id="customerPanel">
+        <div class="customer-header">
+          <div>
+            <p class="eyebrow">Welcome</p>
+            <h3 id="customerName">Customer</h3>
+          </div>
+          <button class="small-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+        <div id="customerSummary" class="balance-strip"></div>
+        <div id="customerCards" class="card-grid"></div>
+        <p id="cardNoteMessage" class="status-message" role="status"></p>
+        <div class="panel-subsection bankmo-section">
+          <h4>Bankmo</h4>
+          <form id="bankmoForm" class="bankmo-form">
+            <input name="recipientName" required placeholder="Recipient name" autocomplete="off" />
+            <input name="amount" required type="number" min="0.01" step="0.01" placeholder="Amount" />
+            <button class="primary-button" type="submit">Send</button>
+          </form>
+          <p id="bankmoMessage" class="status-message" role="status"></p>
+        </div>
+        <div class="panel-subsection">
+          <h4>Recent activity</h4>
+          <div id="customerTransactions" class="record-list compact"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="customer.js"></script>
+  </body>
+</html>

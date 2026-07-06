@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BankLuv Checkout</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell checkout-shell-page">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">BL</span>
+          <div>
+            <h1>BankLuv</h1>
+            <p>Companion checkout</p>
+          </div>
+        </div>
+        <nav class="nav" aria-label="App links">
+          <a class="nav-button" href="/manager">Manager</a>
+          <a class="nav-button active" href="/checkout">Checkout</a>
+          <a class="nav-button" href="/customer">Customer</a>
+        </nav>
+      </aside>
+
+      <main>
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">Companion app</p>
+            <h2>Checkout</h2>
+          </div>
+          <button class="ghost-button hidden" id="lockCheckout" type="button">Lock</button>
+        </section>
+
+        <section class="panel login-panel" id="checkoutLoginPanel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Checkout access</p>
+              <h3>Login</h3>
+            </div>
+          </div>
+          <form id="checkoutLoginForm" class="form-stack">
+            <label>
+              Checkout password
+              <input name="password" required type="password" autocomplete="current-password" />
+            </label>
+            <button class="primary-button" type="submit">Unlock Checkout</button>
+          </form>
+          <p class="helper-text">Default checkout password: <strong>checkout</strong></p>
+          <p id="checkoutLoginMessage" class="status-message" role="status"></p>
+        </section>
+
+        <section id="checkoutApp" class="hidden">
+          <div class="checkout-layout">
+            <section class="panel items-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Companion App</p>
+                  <h3>Cart</h3>
+                </div>
+                <button class="ghost-button" id="clearCart" type="button">Clear</button>
+              </div>
+              <form id="itemForm" class="item-form">
+                <input name="itemName" required placeholder="Item name" />
+                <input name="itemPrice" required type="number" min="0.01" step="0.01" placeholder="Price" />
+                <button class="primary-button" type="submit">Add</button>
+              </form>
+              <div id="cartItems" class="cart-list"></div>
+            </section>
+
+            <section class="panel checkout-panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Square-ish checkout</p>
+                  <h3>Charge</h3>
+                </div>
+              </div>
+              <div class="total-box">
+                <div>
+                  <span>Total</span>
+                  <p class="total-detail" id="discountSummary">$0.00 subtotal</p>
+                </div>
+                <strong id="cartTotal">$0.00</strong>
+              </div>
+              <label class="order-discount-control">
+                Order discount %
+                <input id="orderDiscountInput" name="orderDiscount" type="number" min="0" max="100" step="0.01" value="0" />
+              </label>
+              <fieldset class="method-tabs">
+                <legend>Payment method</legend>
+                <label><input type="radio" name="paymentMethod" value="card" checked />Card</label>
+                <label><input type="radio" name="paymentMethod" value="cash" />Cash</label>
+              </fieldset>
+              <form id="chargeForm" class="form-stack">
+                <label>Company charging<input name="merchantName" required value="BankLuv Companion" /></label>
+                <div id="cardPaymentFields">
+                  <div class="split-heading">
+                    <span>Cards</span>
+                    <button class="small-button" id="addSplitCard" type="button">Add Card</button>
+                  </div>
+                  <div id="splitCards" class="split-card-list"></div>
+                </div>
+                <div id="cashPaymentFields" class="hidden">
+                  <label>Cash customer name<input name="cashName" placeholder="Customer name" /></label>
+                </div>
+                <button class="pay-button" type="submit">Checkout</button>
+              </form>
+              <p id="checkoutMessage" class="status-message" role="status"></p>
+            </section>
+
+            <section class="panel purchases-panel wide">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Companion App</p>
+                  <h3>Previous Purchases</h3>
+                </div>
+              </div>
+              <div id="purchaseHistory" class="purchase-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="checkout.js"></script>
+  </body>
+</html>
