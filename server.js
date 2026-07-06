@@ -84,6 +84,7 @@ function defaultState() {
     ],
     bills: [],
     subscriptions: [],
+    pointRewards: [],
     pointRedemptions: [],
   };
 }
@@ -97,6 +98,7 @@ function normalizeState(state) {
     transactions: [],
     bills: [],
     subscriptions: [],
+    pointRewards: [],
     pointRedemptions: [],
     ...state,
     settings: {
@@ -135,6 +137,13 @@ function normalizeState(state) {
       });
   });
   normalized.bills = normalized.bills.filter((bill) => bill.status !== "paid");
+  normalized.pointRewards = normalized.pointRewards.map((reward) => ({
+    active: true,
+    createdAt: new Date().toISOString(),
+    ...reward,
+    pointsCost: Math.max(0, Math.floor(Number(reward.pointsCost || 0))),
+    value: roundMoney(reward.value),
+  }));
   normalized.pointRedemptions = normalized.pointRedemptions.map((redemption) => ({
     active: true,
     used: false,
@@ -228,6 +237,7 @@ function mergeState(existingState, incomingState) {
     transactions: mergeById(existing.transactions, incoming.transactions),
     bills: mergeById(existing.bills, incoming.bills).filter((bill) => bill.status !== "paid"),
     subscriptions: mergeById(existing.subscriptions, incoming.subscriptions),
+    pointRewards: mergeById(existing.pointRewards, incoming.pointRewards),
     pointRedemptions: mergeById(existing.pointRedemptions, incoming.pointRedemptions),
   });
 }
@@ -418,6 +428,7 @@ function buildCustomerPortal(state, account) {
     .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   const transactions = state.transactions.filter((txn) => txn.accountId === account.id);
   const bills = state.bills.filter((bill) => bill.accountId === account.id);
+  const pointRedemptions = state.pointRedemptions.filter((redemption) => redemption.accountId === account.id && redemption.active && !redemption.used);
 
   return {
     account: {
@@ -429,6 +440,8 @@ function buildCustomerPortal(state, account) {
     cards,
     transactions,
     bills,
+    pointRewards: state.pointRewards.filter((reward) => reward.active),
+    pointRedemptions,
   };
 }
 
@@ -499,6 +512,13 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/api/state" && req.method === "GET") {
       sendJson(res, 200, readState());
+      return;
+    }
+
+    if (url.pathname === "/api/save-now" && req.method === "POST" && APP_MODE !== "customer") {
+      const state = readState();
+      writeState(state);
+      sendJson(res, 200, { state, savedAt: new Date().toISOString() });
       return;
     }
 
@@ -669,21 +689,46 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/point-rewards" && req.method === "POST" && APP_MODE !== "customer") {
+      const body = JSON.parse(await readBody(req));
+      const state = readState();
+      const name = String(body.name || "Points reward").trim();
+      const pointsCost = Math.max(1, Math.floor(Number(body.pointsCost || 0)));
+      const value = roundMoney(body.value);
+      if (!name || pointsCost <= 0 || value <= 0) {
+        sendJson(res, 400, { error: "Reward needs a name, points cost, and value." });
+        return;
+      }
+      state.pointRewards.push({
+        id: makeId("reward"),
+        name,
+        pointsCost,
+        value,
+        active: true,
+        createdAt: new Date().toISOString(),
+      });
+      writeState(state);
+      sendJson(res, 200, state);
+      return;
+    }
+
     if (url.pathname === "/api/point-redemptions" && req.method === "POST" && APP_MODE !== "customer") {
       const body = JSON.parse(await readBody(req));
       const state = readState();
       const card = state.cards.find((entry) => entry.id === body.cardId && entry.active);
       const account = card ? state.accounts.find((entry) => entry.id === card.accountId && entry.active !== false) : null;
-      const name = String(body.name || "Points reward").trim();
-      const pointsCost = Math.max(1, Math.floor(Number(body.pointsCost || 0)));
-      const value = roundMoney(body.value);
+      const reward = body.rewardId ? state.pointRewards.find((entry) => entry.id === body.rewardId && entry.active) : null;
+      const name = String(reward?.name || body.name || "Points reward").trim();
+      const pointsCost = Math.max(1, Math.floor(Number(reward?.pointsCost || body.pointsCost || 0)));
+      const value = roundMoney(reward?.value || body.value);
       if (!card || !account || !name || pointsCost <= 0 || value <= 0) {
-        sendJson(res, 400, { error: "Point redemption needs an active card, name, points cost, and value." });
+        sendJson(res, 400, { error: "Point code needs an active card and reward." });
         return;
       }
       state.pointRedemptions.push({
         id: makeId("points"),
         code: makePointRedemptionCode(state),
+        rewardId: reward?.id || null,
         name,
         cardId: card.id,
         accountId: account.id,

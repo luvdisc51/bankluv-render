@@ -11,6 +11,7 @@ const els = {
   managerLoginForm: document.querySelector("#managerLoginForm"),
   managerLoginMessage: document.querySelector("#managerLoginMessage"),
   managerApp: document.querySelector("#managerApp"),
+  saveRender: document.querySelector("#saveRender"),
   lockManager: document.querySelector("#lockManager"),
   resetDemo: document.querySelector("#resetDemo"),
   accountForm: document.querySelector("#accountForm"),
@@ -18,7 +19,9 @@ const els = {
   giftCardForm: document.querySelector("#giftCardForm"),
   giftCardMessage: document.querySelector("#giftCardMessage"),
   pointRedemptionForm: document.querySelector("#pointRedemptionForm"),
+  pointCodeForm: document.querySelector("#pointCodeForm"),
   pointRedemptionCardSelect: document.querySelector("#pointRedemptionCardSelect"),
+  pointRewardSelect: document.querySelector("#pointRewardSelect"),
   pointRedemptionMessage: document.querySelector("#pointRedemptionMessage"),
   pointRedemptionList: document.querySelector("#pointRedemptionList"),
   passwordForm: document.querySelector("#passwordForm"),
@@ -114,6 +117,7 @@ function normalizeState(nextState) {
     transactions: [],
     bills: [],
     subscriptions: [],
+    pointRewards: [],
     pointRedemptions: [],
     ...nextState,
     settings: {
@@ -151,6 +155,13 @@ function normalizeState(nextState) {
         card.order = index;
       });
   });
+  normalized.pointRewards = (normalized.pointRewards || []).map((reward) => ({
+    active: true,
+    createdAt: new Date().toISOString(),
+    ...reward,
+    pointsCost: Math.max(0, Math.floor(Number(reward.pointsCost || 0))),
+    value: parseMoney(reward.value),
+  }));
   normalized.pointRedemptions = (normalized.pointRedemptions || []).map((redemption) => ({
     active: true,
     used: false,
@@ -392,6 +403,7 @@ function persistAndRender() {
 function renderLockState() {
   els.managerLoginPanel.classList.toggle("hidden", managerUnlocked);
   els.managerApp.classList.toggle("hidden", !managerUnlocked);
+  els.saveRender.classList.toggle("hidden", !managerUnlocked);
   els.lockManager.classList.toggle("hidden", !managerUnlocked);
   els.resetDemo.classList.toggle("hidden", !managerUnlocked);
 }
@@ -430,6 +442,12 @@ function renderManager() {
         })
         .join("")
     : `<option value="">Create an active card first</option>`;
+  els.pointRewardSelect.innerHTML = state.pointRewards.filter((reward) => reward.active).length
+    ? state.pointRewards
+        .filter((reward) => reward.active)
+        .map((reward) => `<option value="${reward.id}">${escapeHtml(reward.name)} - ${reward.pointsCost} pts for ${money(reward.value)}</option>`)
+        .join("")
+    : `<option value="">Create a reward first</option>`;
   els.subscriptionCardSelect.innerHTML = creditCards.length
     ? creditCards
         .map((card) => {
@@ -508,8 +526,26 @@ function renderManagerAccount(account) {
 }
 
 function renderPointRedemptions() {
+  const rewards = [...state.pointRewards].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const redemptions = [...state.pointRedemptions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  els.pointRedemptionList.innerHTML = redemptions.length
+  const rewardsHtml = rewards.length
+    ? rewards
+        .map(
+          (reward) => `
+            <article class="record">
+              <div class="record-top">
+                <div>
+                  <div class="record-title">${escapeHtml(reward.name)}</div>
+                  <div class="record-meta">${reward.pointsCost} pts for ${money(reward.value)}</div>
+                </div>
+                <span class="badge cash">Reward</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")
+    : `<div class="empty">No rewards yet.</div>`;
+  const codesHtml = redemptions.length
     ? redemptions
         .map((redemption) => {
           const card = findCard(redemption.cardId);
@@ -529,7 +565,8 @@ function renderPointRedemptions() {
           `;
         })
         .join("")
-    : `<div class="empty">No point redemption codes yet.</div>`;
+    : `<div class="empty">No point one-time cards yet.</div>`;
+  els.pointRedemptionList.innerHTML = `${rewardsHtml}${codesHtml}`;
 }
 
 function renderSubscriptions() {
@@ -615,6 +652,21 @@ els.lockManager.addEventListener("click", () => {
 els.resetDemo.addEventListener("click", () => {
   state = defaultState();
   persistAndRender();
+});
+
+els.saveRender.addEventListener("click", () => {
+  if (location.protocol !== "file:") {
+    postJson("/api/save-now")
+      .then((result) => {
+        state = normalizeState(result.state);
+        alert(`Saved at ${new Date(result.savedAt).toLocaleString()}.`);
+        render();
+      })
+      .catch((error) => alert(error.message));
+    return;
+  }
+  saveState();
+  alert("Saved.");
 });
 
 els.cardType.addEventListener("change", () => {
@@ -756,13 +808,57 @@ els.pointRedemptionForm.addEventListener("submit", (event) => {
   const formElement = event.currentTarget;
   const form = new FormData(formElement);
   const payload = {
-    cardId: String(form.get("cardId")),
     name: String(form.get("name")).trim(),
     pointsCost: Math.max(1, Math.floor(Number(form.get("pointsCost")))),
     value: parseMoney(form.get("value")),
   };
-  if (!payload.cardId || !payload.name || payload.pointsCost <= 0 || payload.value <= 0) {
-    els.pointRedemptionMessage.textContent = "Choose a card, reward name, points cost, and value.";
+  if (!payload.name || payload.pointsCost <= 0 || payload.value <= 0) {
+    els.pointRedemptionMessage.textContent = "Enter a reward name, points cost, and value.";
+    els.pointRedemptionMessage.className = "status-message error";
+    return;
+  }
+  if (location.protocol !== "file:") {
+    postJson("/api/point-rewards", payload)
+      .then((nextState) => {
+        state = normalizeState(nextState);
+        formElement.reset();
+        formElement.pointsCost.value = "500";
+        formElement.value.value = "5.00";
+        els.pointRedemptionMessage.textContent = "Reward created.";
+        els.pointRedemptionMessage.className = "status-message success";
+        render();
+      })
+      .catch((error) => {
+        els.pointRedemptionMessage.textContent = error.message;
+        els.pointRedemptionMessage.className = "status-message error";
+      });
+    return;
+  }
+
+  state.pointRewards.push({
+    id: makeId("reward"),
+    ...payload,
+    active: true,
+    createdAt: new Date().toISOString(),
+  });
+  formElement.reset();
+  formElement.pointsCost.value = "500";
+  formElement.value.value = "5.00";
+  els.pointRedemptionMessage.textContent = "Reward created.";
+  els.pointRedemptionMessage.className = "status-message success";
+  persistAndRender();
+});
+
+els.pointCodeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const payload = {
+    cardId: String(form.get("cardId")),
+    rewardId: String(form.get("rewardId")),
+  };
+  if (!payload.cardId || !payload.rewardId) {
+    els.pointRedemptionMessage.textContent = "Choose a card and reward.";
     els.pointRedemptionMessage.className = "status-message error";
     return;
   }
@@ -771,9 +867,7 @@ els.pointRedemptionForm.addEventListener("submit", (event) => {
       .then((nextState) => {
         state = normalizeState(nextState);
         formElement.reset();
-        formElement.pointsCost.value = "500";
-        formElement.value.value = "5.00";
-        els.pointRedemptionMessage.textContent = "Point redemption code created.";
+        els.pointRedemptionMessage.textContent = "1-time points card generated.";
         els.pointRedemptionMessage.className = "status-message success";
         render();
       })
@@ -786,25 +880,27 @@ els.pointRedemptionForm.addEventListener("submit", (event) => {
 
   const card = findCard(payload.cardId);
   const account = card ? findAccount(card.accountId) : null;
-  if (!card || !account) {
-    els.pointRedemptionMessage.textContent = "Choose an active card.";
+  const reward = state.pointRewards.find((entry) => entry.id === payload.rewardId && entry.active);
+  if (!card || !account || !reward) {
+    els.pointRedemptionMessage.textContent = "Choose an active card and reward.";
     els.pointRedemptionMessage.className = "status-message error";
     return;
   }
   state.pointRedemptions.push({
     id: makeId("points"),
     code: makePointRedemptionCode(),
-    ...payload,
+    rewardId: reward.id,
+    name: reward.name,
+    pointsCost: reward.pointsCost,
+    value: reward.value,
+    cardId: card.id,
     accountId: account.id,
     active: true,
     used: false,
     usedAt: null,
     createdAt: new Date().toISOString(),
   });
-  formElement.reset();
-  formElement.pointsCost.value = "500";
-  formElement.value.value = "5.00";
-  els.pointRedemptionMessage.textContent = "Point redemption code created.";
+  els.pointRedemptionMessage.textContent = "1-time points card generated.";
   els.pointRedemptionMessage.className = "status-message success";
   persistAndRender();
 });

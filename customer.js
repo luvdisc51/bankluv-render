@@ -16,6 +16,8 @@ const els = {
   customerName: document.querySelector("#customerName"),
   customerSummary: document.querySelector("#customerSummary"),
   customerCards: document.querySelector("#customerCards"),
+  customerRewards: document.querySelector("#customerRewards"),
+  customerPointCards: document.querySelector("#customerPointCards"),
   cardNoteMessage: document.querySelector("#cardNoteMessage"),
   bankmoForm: document.querySelector("#bankmoForm"),
   bankmoMessage: document.querySelector("#bankmoMessage"),
@@ -89,7 +91,7 @@ async function customerLogin(username, password) {
   }
 
   const saved = localStorage.getItem(STORAGE_KEY);
-  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [] };
+  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [], pointRewards: [], pointRedemptions: [] };
   const normalizedUsername = normalizeCredential(username);
   const normalizedPassword = normalizeCredential(password);
   const account = state.accounts.find(
@@ -117,7 +119,7 @@ async function loadPortal(accountId) {
   }
 
   const saved = localStorage.getItem(STORAGE_KEY);
-  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [] };
+  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [], pointRewards: [], pointRedemptions: [] };
   const account = state.accounts.find((entry) => entry.id === accountId && entry.active !== false);
   return account ? buildPortalFromState(state, account) : null;
 }
@@ -135,6 +137,10 @@ function buildPortalFromState(state, account) {
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
     transactions: state.transactions.filter((txn) => txn.accountId === account.id),
     bills: state.bills.filter((bill) => bill.accountId === account.id),
+    pointRewards: (state.pointRewards || []).filter((reward) => reward.active !== false),
+    pointRedemptions: (state.pointRedemptions || []).filter(
+      (redemption) => redemption.accountId === account.id && redemption.active !== false && !redemption.used,
+    ),
   };
 }
 
@@ -157,7 +163,7 @@ async function saveCardNote(cardId, note) {
   }
 
   const saved = localStorage.getItem(STORAGE_KEY);
-  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [] };
+  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [], pointRewards: [], pointRedemptions: [] };
   const card = state.cards.find((entry) => entry.id === cardId && entry.accountId === portal.account.id && entry.active);
   if (!card) throw new Error("Card was not found for this customer.");
   card.note = note;
@@ -184,7 +190,7 @@ async function sendBankmo(recipientName, amount) {
   }
 
   const saved = localStorage.getItem(STORAGE_KEY);
-  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [] };
+  const state = saved ? JSON.parse(saved) : { accounts: [], cards: [], transactions: [], bills: [], pointRewards: [], pointRedemptions: [] };
   const sender = state.accounts.find((entry) => entry.id === portal.account.id && entry.active !== false);
   const matches = state.accounts.filter(
     (entry) => entry.active !== false && entry.id !== portal.account.id && normalizeName(entry.ownerName) === normalizeName(recipientName),
@@ -254,10 +260,51 @@ function render() {
     ? cards.map(renderCard).join("")
     : `<div class="empty">No active cards yet.</div>`;
 
+  const rewards = portal.pointRewards || [];
+  els.customerRewards.innerHTML = rewards.length
+    ? rewards.map(renderReward).join("")
+    : `<div class="empty">No rewards available yet.</div>`;
+
+  const pointCards = portal.pointRedemptions || [];
+  els.customerPointCards.innerHTML = pointCards.length
+    ? pointCards.map(renderPointCard).join("")
+    : `<div class="empty">No 1-time points cards yet.</div>`;
+
   const txns = (portal.transactions || []).slice().reverse();
   els.customerTransactions.innerHTML = txns.length
     ? txns.map(renderTransaction).join("")
     : `<div class="empty">No card activity yet.</div>`;
+}
+
+function renderReward(reward) {
+  return `
+    <article class="record">
+      <div class="record-top">
+        <div>
+          <div class="record-title">${escapeHtml(reward.name)}</div>
+          <div class="record-meta">${Number(reward.pointsCost || 0).toLocaleString("en-US")} pts for ${money(reward.value)}</div>
+        </div>
+        <span class="badge cash">Reward</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderPointCard(redemption) {
+  return `
+    <article class="bank-card points-card">
+      <span>POINTS 1-TIME USE</span>
+      <div class="card-number">${formatCardNumber(redemption.code)}</div>
+      <div class="card-foot">
+        <span>${escapeHtml(redemption.name)}</span>
+        <span>${Number(redemption.pointsCost || 0).toLocaleString("en-US")} pts</span>
+      </div>
+      <div class="card-points">
+        <span>Redeem value</span>
+        <strong>${money(redemption.value)}</strong>
+      </div>
+    </article>
+  `;
 }
 
 function renderCard(card) {

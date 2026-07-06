@@ -492,6 +492,10 @@ select:focus {
   background: linear-gradient(135deg, #1e3152, #2366b3);
 }
 
+.bank-card.points-card {
+  background: linear-gradient(135deg, #8a4b09, #e18a17);
+}
+
 .card-number {
   font-size: 1.1rem;
   font-weight: 850;
