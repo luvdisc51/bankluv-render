@@ -318,18 +318,26 @@ function payBill(state, bill) {
 function buildCheckoutItems(items) {
   return items.map((item) => {
     const price = roundMoney(item.price);
-    const discountPercent = parsePercent(item.discountPercent);
+    const quantity = Math.max(1, Math.floor(Number(item.quantity || 1)));
+    const rawDiscounts = Array.isArray(item.unitDiscountPercents) ? item.unitDiscountPercents : [];
+    const unitDiscountPercents = Array.from({ length: quantity }, (_, index) => parsePercent(rawDiscounts[index] ?? item.discountPercent ?? 0));
+    const discountPercent = unitDiscountPercents.every((discount) => discount === unitDiscountPercents[0]) ? unitDiscountPercents[0] : 0;
+    const subtotal = roundMoney(price * quantity);
+    const finalPrice = roundMoney(unitDiscountPercents.reduce((sum, discount) => sum + price * (1 - discount / 100), 0));
     return {
       name: String(item.name || "").trim(),
       price,
+      quantity,
+      unitDiscountPercents,
       discountPercent,
-      finalPrice: roundMoney(price * (1 - discountPercent / 100)),
+      subtotal,
+      finalPrice,
     };
   });
 }
 
 function checkoutTotals(items, orderDiscountPercent) {
-  const subtotal = roundMoney(items.reduce((sum, item) => sum + Number(item.price || 0), 0));
+  const subtotal = roundMoney(items.reduce((sum, item) => sum + Number(item.subtotal ?? item.price ?? 0), 0));
   const afterItemDiscounts = roundMoney(items.reduce((sum, item) => sum + Number(item.finalPrice || 0), 0));
   const itemDiscountAmount = roundMoney(subtotal - afterItemDiscounts);
   const orderDiscountAmount = roundMoney(afterItemDiscounts * (parsePercent(orderDiscountPercent) / 100));

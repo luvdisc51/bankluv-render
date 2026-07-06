@@ -54,6 +54,7 @@ function normalizeState(nextState) {
   normalized.cards.forEach((card) => {
     if (typeof card.active !== "boolean") card.active = true;
   });
+  normalized.cart = normalized.cart.map(normalizeCartItem);
   return normalized;
 }
 
@@ -90,6 +91,29 @@ function parsePercent(value) {
 
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function itemQuantity(item) {
+  const quantity = Math.floor(Number(item.quantity || 1));
+  return Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+}
+
+function itemUnitDiscounts(item) {
+  const quantity = itemQuantity(item);
+  const rawDiscounts = Array.isArray(item.unitDiscountPercents) ? item.unitDiscountPercents : [];
+  return Array.from({ length: quantity }, (_, index) => parsePercent(rawDiscounts[index] ?? item.discountPercent ?? 0));
+}
+
+function normalizeCartItem(item) {
+  const quantity = itemQuantity(item);
+  const unitDiscountPercents = itemUnitDiscounts({ ...item, quantity });
+  return {
+    ...item,
+    price: parseMoney(item.price),
+    quantity,
+    unitDiscountPercents,
+    discountPercent: unitDiscountPercents.every((discount) => discount === unitDiscountPercents[0]) ? unitDiscountPercents[0] : 0,
+  };
 }
 
 function escapeHtml(value) {
@@ -157,15 +181,22 @@ function cartTotal() {
 }
 
 function itemDiscountPercent(item) {
-  return parsePercent(item.discountPercent);
+  const discounts = itemUnitDiscounts(item);
+  return discounts.every((discount) => discount === discounts[0]) ? discounts[0] : 0;
+}
+
+function itemSubtotal(item) {
+  return roundMoney(Number(item.price || 0) * itemQuantity(item));
 }
 
 function itemFinalPrice(item) {
-  return roundMoney(Number(item.price || 0) * (1 - itemDiscountPercent(item) / 100));
+  return roundMoney(
+    itemUnitDiscounts(item).reduce((sum, discountPercent) => sum + Number(item.price || 0) * (1 - discountPercent / 100), 0),
+  );
 }
 
 function cartTotals() {
-  const subtotal = roundMoney(state.cart.reduce((sum, item) => sum + Number(item.price || 0), 0));
+  const subtotal = roundMoney(state.cart.reduce((sum, item) => sum + itemSubtotal(item), 0));
   const afterItemDiscounts = roundMoney(state.cart.reduce((sum, item) => sum + itemFinalPrice(item), 0));
   const itemDiscountAmount = roundMoney(subtotal - afterItemDiscounts);
   const orderDiscountPercent = parsePercent(state.checkout.orderDiscountPercent);
@@ -218,19 +249,35 @@ function renderCart() {
   els.cartItems.innerHTML = state.cart.length
     ? state.cart
         .map(
-          (item) => `
+          (item) => {
+            const discounts = itemUnitDiscounts(item);
+            const sameDiscount = discounts.every((discount) => discount === discounts[0]);
+            return `
           <div class="cart-row">
             <div class="cart-main">
-              <div class="record-title">${escapeHtml(item.name)}</div>
-              <div class="record-meta">${money(item.price)}${itemDiscountPercent(item) > 0 ? ` - ${itemDiscountPercent(item)}% off = ${money(itemFinalPrice(item))}` : ""}</div>
+              <div class="record-title">${escapeHtml(item.name)} x${itemQuantity(item)}</div>
+              <div class="record-meta">${money(item.price)} each - ${money(itemFinalPrice(item))} line total${itemSubtotal(item) !== itemFinalPrice(item) ? ` - ${money(itemSubtotal(item) - itemFinalPrice(item))} off` : ""}</div>
             </div>
             <label class="line-discount-control">
-              Discount %
-              <input data-discount-id="${item.id}" type="number" min="0" max="100" step="0.01" value="${itemDiscountPercent(item)}" />
+              All %
+              <input data-discount-all-id="${item.id}" type="number" min="0" max="100" step="0.01" value="${sameDiscount ? discounts[0] : 0}" />
             </label>
+            <div class="unit-discount-grid">
+              ${discounts
+                .map(
+                  (discount, index) => `
+                    <label>
+                      #${index + 1} %
+                      <input data-unit-discount-id="${item.id}" data-unit-index="${index}" type="number" min="0" max="100" step="0.01" value="${discount}" />
+                    </label>
+                  `,
+                )
+                .join("")}
+            </div>
             <button class="icon-button" data-action="remove-item" data-id="${item.id}" type="button" aria-label="Remove ${escapeHtml(item.name)}">x</button>
           </div>
-        `,
+        `;
+          },
         )
         .join("")
     : `<div class="empty">Cart is empty.</div>`;
@@ -312,9 +359,13 @@ function renderPurchase(txn) {
       </div>
       <p class="purchase-items">${txn.items
         .map((item) => {
-          const discount = parsePercent(item.discountPercent);
+          const quantity = itemQuantity(item);
+          const discounts = itemUnitDiscounts(item);
+          const unitDiscountText = discounts.some((discount) => discount > 0)
+            ? ` (${discounts.map((discount, index) => `#${index + 1}: ${discount}%`).join(", ")})`
+            : "";
           const finalPrice = item.finalPrice ?? item.price;
-          return `${escapeHtml(item.name)} ${money(finalPrice)}${discount > 0 ? ` (${discount}% off)` : ""}`;
+          return `${escapeHtml(item.name)} x${quantity} ${money(finalPrice)}${unitDiscountText}`;
         })
         .join(" - ")}</p>
       ${
@@ -367,9 +418,11 @@ els.itemForm.addEventListener("submit", (event) => {
   const form = new FormData(formElement);
   const name = String(form.get("itemName")).trim();
   const price = parseMoney(form.get("itemPrice"));
+  const quantity = Math.max(1, Math.floor(Number(form.get("itemQuantity") || 1)));
   if (!name || price <= 0) return;
-  state.cart.push({ id: makeId("item"), name, price, discountPercent: 0 });
+  state.cart.push({ id: makeId("item"), name, price, quantity, unitDiscountPercents: Array.from({ length: quantity }, () => 0) });
   formElement.reset();
+  formElement.itemQuantity.value = "1";
   persistAndRender();
 });
 
@@ -388,11 +441,19 @@ els.cartItems.addEventListener("click", (event) => {
 });
 
 els.cartItems.addEventListener("change", (event) => {
-  const input = event.target.closest("input[data-discount-id]");
-  if (!input) return;
-  const item = state.cart.find((entry) => entry.id === input.dataset.discountId);
+  const allInput = event.target.closest("input[data-discount-all-id]");
+  const unitInput = event.target.closest("input[data-unit-discount-id]");
+  if (!allInput && !unitInput) return;
+  const itemId = allInput?.dataset.discountAllId || unitInput?.dataset.unitDiscountId;
+  const item = state.cart.find((entry) => entry.id === itemId);
   if (!item) return;
-  item.discountPercent = parsePercent(input.value);
+  item.unitDiscountPercents = itemUnitDiscounts(item);
+  if (allInput) {
+    item.unitDiscountPercents = item.unitDiscountPercents.map(() => parsePercent(allInput.value));
+  } else {
+    item.unitDiscountPercents[Number(unitInput.dataset.unitIndex)] = parsePercent(unitInput.value);
+  }
+  item.discountPercent = itemDiscountPercent(item);
   persistAndRender();
 });
 
@@ -459,6 +520,8 @@ els.chargeForm.addEventListener("submit", (event) => {
   const items = state.cart.map((item) => ({
     name: item.name,
     price: item.price,
+    quantity: itemQuantity(item),
+    unitDiscountPercents: itemUnitDiscounts(item),
     discountPercent: itemDiscountPercent(item),
     finalPrice: itemFinalPrice(item),
   }));
