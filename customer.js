@@ -266,6 +266,7 @@ function renderCard(card) {
     card.type === "credit"
       ? `Balance ${money(card.balance)} - Available ${money(Math.max(card.creditLimit - card.balance, 0))}`
       : "Spends directly from cash balance";
+  const points = Math.max(0, Math.floor(Number(card.points || 0)));
 
   return `
     <article class="bank-card ${card.type === "credit" ? "credit" : ""}">
@@ -274,6 +275,10 @@ function renderCard(card) {
       <div class="card-foot">
         <span>${detail}</span>
         <span>${card.type === "debit" ? `PIN ${escapeHtml(card.pin)}` : money(card.creditLimit)}</span>
+      </div>
+      <div class="card-points">
+        <span>Store points</span>
+        <strong>${points.toLocaleString("en-US")}</strong>
       </div>
       <label class="card-note-control">
         Note

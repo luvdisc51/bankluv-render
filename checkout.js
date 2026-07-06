@@ -37,6 +37,7 @@ function normalizeState(nextState) {
     cards: [],
     transactions: [],
     bills: [],
+    pointRedemptions: [],
     ...nextState,
     checkout: {
       orderDiscountPercent: 0,
@@ -53,7 +54,9 @@ function normalizeState(nextState) {
   });
   normalized.cards.forEach((card) => {
     if (typeof card.active !== "boolean") card.active = true;
+    card.points = Math.max(0, Math.floor(Number(card.points || 0)));
   });
+  normalized.pointRedemptions = normalized.pointRedemptions || [];
   normalized.cart = normalized.cart.map(normalizeCartItem);
   return normalized;
 }
@@ -174,6 +177,12 @@ function findCard(id) {
 function findCardByNumber(number) {
   const normalized = cleanNumber(number);
   return state.cards.find((card) => card.active && cleanNumber(card.number) === normalized);
+}
+
+function findPointRedemption(code) {
+  const normalized = cleanNumber(code);
+  if (!normalized) return null;
+  return state.pointRedemptions.find((entry) => entry.active && !entry.used && cleanNumber(entry.code) === normalized);
 }
 
 function cartTotal() {
@@ -374,10 +383,15 @@ function renderPurchase(txn) {
           : ""
       }
       ${
-        txn.paymentSplits?.length
+    txn.paymentSplits?.length
           ? `<div class="record-meta">Cards: ${txn.paymentSplits
               .map((split) => `${escapeHtml(split.type)} ending ${escapeHtml(split.last4)} ${money(split.amount)}`)
               .join(" - ")}</div>`
+          : ""
+      }
+      ${
+        txn.pointRedemption
+          ? `<div class="record-meta">Points: ${escapeHtml(txn.pointRedemption.name)} - ${money(txn.pointRedemption.value)} for ${txn.pointRedemption.pointsCost} pts</div>`
           : ""
       }
       <div class="money-row"><span>Total</span><strong>${money(txn.total)}</strong></div>
@@ -512,10 +526,14 @@ els.chargeForm.addEventListener("submit", (event) => {
   }
 
   const form = new FormData(formElement);
+  const pointRedemption = findPointRedemption(form.get("pointRedemptionCode"));
+  const redemptionCard = pointRedemption ? findCard(pointRedemption.cardId) : null;
+  const pointRedemptionAmount = pointRedemption ? roundMoney(Math.min(Number(pointRedemption.value || 0), total)) : 0;
+  const totalDue = roundMoney(total - pointRedemptionAmount);
   const cardPayments = splitCards.map((split) => ({
     cardNumber: split.cardNumber,
     pin: split.pin,
-    amount: split.amount,
+    amount: split.manual ? split.amount : 0,
   }));
   const items = state.cart.map((item) => ({
     name: item.name,
@@ -533,6 +551,7 @@ els.chargeForm.addEventListener("submit", (event) => {
       method,
       cardPayments,
       merchantName: form.get("merchantName"),
+      pointRedemptionCode: form.get("pointRedemptionCode"),
       cashName: form.get("cashName"),
     };
     postJson("/api/checkout-charge", payload)
@@ -551,6 +570,14 @@ els.chargeForm.addEventListener("submit", (event) => {
     return;
   }
 
+  if (cleanNumber(form.get("pointRedemptionCode")) && (!pointRedemption || !redemptionCard)) {
+    setCheckoutMessage("That points code was not found or was already used.", "error");
+    return;
+  }
+  if (pointRedemption && Number(redemptionCard.points || 0) < Number(pointRedemption.pointsCost || 0)) {
+    setCheckoutMessage("That card does not have enough points for this redemption.", "error");
+    return;
+  }
   const transaction = {
     id: makeId("txn"),
     createdAt: new Date().toISOString(),
@@ -560,8 +587,20 @@ els.chargeForm.addEventListener("submit", (event) => {
     itemDiscountAmount: totals.itemDiscountAmount,
     orderDiscountPercent: totals.orderDiscountPercent,
     orderDiscountAmount: totals.orderDiscountAmount,
-    discountTotal: totals.discountTotal,
-    total,
+    discountTotal: roundMoney(totals.discountTotal + pointRedemptionAmount),
+    preRedemptionTotal: total,
+    pointRedemptionAmount,
+    total: totalDue,
+    pointRedemption: pointRedemption
+      ? {
+          id: pointRedemption.id,
+          code: pointRedemption.code,
+          name: pointRedemption.name,
+          cardId: pointRedemption.cardId,
+          pointsCost: pointRedemption.pointsCost,
+          value: pointRedemptionAmount,
+        }
+      : null,
     method: "cash",
     cardId: null,
     accountId: null,
@@ -569,7 +608,11 @@ els.chargeForm.addEventListener("submit", (event) => {
     status: "approved",
   };
 
-  if (method === "cash") {
+  if (totalDue <= 0) {
+    transaction.method = "points";
+    transaction.cardId = pointRedemption.cardId;
+    transaction.accountId = pointRedemption.accountId;
+  } else if (method === "cash") {
     const cashName = String(form.get("cashName")).trim();
     if (!cashName) {
       setCheckoutMessage("Cash checkout requires a customer name.", "error");
@@ -579,8 +622,8 @@ els.chargeForm.addEventListener("submit", (event) => {
   } else {
     const payments = cardPayments.filter((payment) => cleanNumber(payment.cardNumber));
     const paymentTotal = roundMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-    if (!payments.length || paymentTotal !== total) {
-      setCheckoutMessage(`Card split must add up to ${money(total)}.`, "error");
+    if (!payments.length || paymentTotal !== totalDue) {
+      setCheckoutMessage(`Card split must add up to ${money(totalDue)}.`, "error");
       return;
     }
     const applied = [];
@@ -661,6 +704,7 @@ els.chargeForm.addEventListener("submit", (event) => {
     applied.forEach(({ card, account, amount }) => {
       if (card.type === "debit") account.balance = parseMoney(account.balance - amount);
       else card.balance = parseMoney(card.balance + amount);
+      card.points = Math.max(0, Math.floor(Number(card.points || 0) + Math.round(amount * 100)));
     });
     transaction.method = applied.length > 1 ? "split-card" : applied[0].card.type;
     transaction.cardId = applied[0].card.id;
@@ -673,6 +717,12 @@ els.chargeForm.addEventListener("submit", (event) => {
     }));
   }
 
+  if (pointRedemption) {
+    redemptionCard.points = Math.max(0, Math.floor(Number(redemptionCard.points || 0) - Number(pointRedemption.pointsCost || 0)));
+    pointRedemption.used = true;
+    pointRedemption.usedAt = new Date().toISOString();
+    pointRedemption.transactionId = transaction.id;
+  }
   state.transactions.push(transaction);
   state.cart = [];
   state.checkout.orderDiscountPercent = 0;

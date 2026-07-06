@@ -17,6 +17,10 @@ const els = {
   cardForm: document.querySelector("#cardForm"),
   giftCardForm: document.querySelector("#giftCardForm"),
   giftCardMessage: document.querySelector("#giftCardMessage"),
+  pointRedemptionForm: document.querySelector("#pointRedemptionForm"),
+  pointRedemptionCardSelect: document.querySelector("#pointRedemptionCardSelect"),
+  pointRedemptionMessage: document.querySelector("#pointRedemptionMessage"),
+  pointRedemptionList: document.querySelector("#pointRedemptionList"),
   passwordForm: document.querySelector("#passwordForm"),
   passwordMessage: document.querySelector("#passwordMessage"),
   cardAccountSelect: document.querySelector("#cardAccountSelect"),
@@ -110,6 +114,7 @@ function normalizeState(nextState) {
     transactions: [],
     bills: [],
     subscriptions: [],
+    pointRedemptions: [],
     ...nextState,
     settings: {
       managerPassword: "manager",
@@ -126,6 +131,7 @@ function normalizeState(nextState) {
     const key = card.accountId || "_none";
     const nextOrder = cardCounts.get(key) ?? 0;
     if (typeof card.active !== "boolean") card.active = true;
+    card.points = Math.max(0, Math.floor(Number(card.points || 0)));
     if (!Number.isFinite(Number(card.order))) card.order = nextOrder;
     cardCounts.set(key, nextOrder + 1);
     if (!card.createdAt) card.createdAt = new Date(Date.now() + index).toISOString();
@@ -145,6 +151,14 @@ function normalizeState(nextState) {
         card.order = index;
       });
   });
+  normalized.pointRedemptions = (normalized.pointRedemptions || []).map((redemption) => ({
+    active: true,
+    used: false,
+    createdAt: new Date().toISOString(),
+    ...redemption,
+    pointsCost: Math.max(0, Math.floor(Number(redemption.pointsCost || 0))),
+    value: parseMoney(redemption.value),
+  }));
   return normalized;
 }
 
@@ -299,6 +313,15 @@ function usernameFromName(name) {
   return username;
 }
 
+function makePointRedemptionCode() {
+  const usedCodes = new Set(state.pointRedemptions.map((entry) => String(entry.code || "")));
+  let code = "";
+  do {
+    code = `7777${Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join("")}`;
+  } while (usedCodes.has(code));
+  return code;
+}
+
 function cardHistoryEntries(card) {
   const account = findAccount(card.accountId);
   const entries = [];
@@ -397,7 +420,16 @@ function renderManager() {
     : `<div class="empty">No accounts yet. Create the first fake USD account.</div>`;
 
   const activeAccountIds = new Set(accounts.map((account) => account.id));
+  const activeCards = state.cards.filter((card) => card.active && activeAccountIds.has(card.accountId));
   const creditCards = state.cards.filter((card) => card.type === "credit" && card.active && activeAccountIds.has(card.accountId));
+  els.pointRedemptionCardSelect.innerHTML = activeCards.length
+    ? activeCards
+        .map((card) => {
+          const account = findAccount(card.accountId);
+          return `<option value="${card.id}">${escapeHtml(account?.ownerName || "Unknown")} - ${formatCardNumber(card.number)} - ${card.points || 0} pts</option>`;
+        })
+        .join("")
+    : `<option value="">Create an active card first</option>`;
   els.subscriptionCardSelect.innerHTML = creditCards.length
     ? creditCards
         .map((card) => {
@@ -412,6 +444,7 @@ function renderManager() {
     : `<div class="empty">No active credit cards to bill.</div>`;
 
   renderSubscriptions();
+  renderPointRedemptions();
 }
 
 function renderManagerAccount(account) {
@@ -429,7 +462,7 @@ function renderManagerAccount(account) {
                 <div>
                   <span class="badge ${card.type === "credit" ? "credit" : ""}">${card.type}</span>
                   <div class="record-title">${formatCardNumber(card.number)}</div>
-                  <div class="record-meta">${balanceLine}${card.type === "debit" ? ` - PIN ${escapeHtml(card.pin)}` : ""}</div>
+                  <div class="record-meta">${balanceLine}${card.type === "debit" ? ` - PIN ${escapeHtml(card.pin)}` : ""} - ${card.points || 0} pts</div>
                   ${noteLine}
                 </div>
                 <div class="order-actions">
@@ -472,6 +505,31 @@ function renderManagerAccount(account) {
       <div class="cards-inside">${cardsHtml}</div>
     </article>
   `;
+}
+
+function renderPointRedemptions() {
+  const redemptions = [...state.pointRedemptions].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  els.pointRedemptionList.innerHTML = redemptions.length
+    ? redemptions
+        .map((redemption) => {
+          const card = findCard(redemption.cardId);
+          const account = card ? findAccount(card.accountId) : null;
+          const status = redemption.used ? "Used" : redemption.active ? "Unused" : "Inactive";
+          return `
+            <article class="record">
+              <div class="record-top">
+                <div>
+                  <div class="record-title">${escapeHtml(redemption.name)} - ${escapeHtml(redemption.code)}</div>
+                  <div class="record-meta">${escapeHtml(account?.ownerName || "Unknown")} - ${card ? formatCardNumber(card.number) : "Missing card"}</div>
+                  <div class="record-meta">${redemption.pointsCost} pts for ${money(redemption.value)} - ${status}</div>
+                </div>
+                <span class="badge ${redemption.used ? "" : "cash"}">${status}</span>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<div class="empty">No point redemption codes yet.</div>`;
 }
 
 function renderSubscriptions() {
@@ -629,6 +687,7 @@ els.cardForm.addEventListener("submit", (event) => {
     pin: type === "debit" ? pin : "",
     creditLimit: type === "credit" ? parseMoney(form.get("creditLimit")) : 0,
     balance: 0,
+    points: 0,
     active: true,
     order: state.cards.filter((card) => card.accountId === accountId).length,
     createdAt: new Date().toISOString(),
@@ -679,6 +738,7 @@ els.giftCardForm.addEventListener("submit", (event) => {
       pin: "0303",
       creditLimit: 0,
       balance: 0,
+      points: 0,
       active: true,
       order: 0,
       createdAt: new Date().toISOString(),
@@ -688,6 +748,64 @@ els.giftCardForm.addEventListener("submit", (event) => {
   els.giftCardMessage.textContent = `Created ${count} gift card${count === 1 ? "" : "s"} with PIN 0303.`;
   els.giftCardMessage.className = "status-message success";
   formElement.giftCardName.value = `${parsedName.prefix}${parsedName.startNumber + count}`;
+  persistAndRender();
+});
+
+els.pointRedemptionForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+  const payload = {
+    cardId: String(form.get("cardId")),
+    name: String(form.get("name")).trim(),
+    pointsCost: Math.max(1, Math.floor(Number(form.get("pointsCost")))),
+    value: parseMoney(form.get("value")),
+  };
+  if (!payload.cardId || !payload.name || payload.pointsCost <= 0 || payload.value <= 0) {
+    els.pointRedemptionMessage.textContent = "Choose a card, reward name, points cost, and value.";
+    els.pointRedemptionMessage.className = "status-message error";
+    return;
+  }
+  if (location.protocol !== "file:") {
+    postJson("/api/point-redemptions", payload)
+      .then((nextState) => {
+        state = normalizeState(nextState);
+        formElement.reset();
+        formElement.pointsCost.value = "500";
+        formElement.value.value = "5.00";
+        els.pointRedemptionMessage.textContent = "Point redemption code created.";
+        els.pointRedemptionMessage.className = "status-message success";
+        render();
+      })
+      .catch((error) => {
+        els.pointRedemptionMessage.textContent = error.message;
+        els.pointRedemptionMessage.className = "status-message error";
+      });
+    return;
+  }
+
+  const card = findCard(payload.cardId);
+  const account = card ? findAccount(card.accountId) : null;
+  if (!card || !account) {
+    els.pointRedemptionMessage.textContent = "Choose an active card.";
+    els.pointRedemptionMessage.className = "status-message error";
+    return;
+  }
+  state.pointRedemptions.push({
+    id: makeId("points"),
+    code: makePointRedemptionCode(),
+    ...payload,
+    accountId: account.id,
+    active: true,
+    used: false,
+    usedAt: null,
+    createdAt: new Date().toISOString(),
+  });
+  formElement.reset();
+  formElement.pointsCost.value = "500";
+  formElement.value.value = "5.00";
+  els.pointRedemptionMessage.textContent = "Point redemption code created.";
+  els.pointRedemptionMessage.className = "status-message success";
   persistAndRender();
 });
 

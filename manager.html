@@ -122,6 +122,26 @@
               <p id="giftCardMessage" class="status-message" role="status"></p>
             </section>
 
+            <section class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">Store Points</p>
+                  <h3>Point Redemptions</h3>
+                </div>
+              </div>
+              <form id="pointRedemptionForm" class="form-stack">
+                <label>Card<select name="cardId" id="pointRedemptionCardSelect" required></select></label>
+                <label>Reward name<input name="name" required placeholder="$5 off reward" /></label>
+                <div class="two-col">
+                  <label>Points cost<input name="pointsCost" required type="number" min="1" step="1" value="500" /></label>
+                  <label>Redeem value<input name="value" required type="number" min="0.01" step="0.01" value="5.00" /></label>
+                </div>
+                <button class="primary-button" type="submit">Create Code</button>
+              </form>
+              <p id="pointRedemptionMessage" class="status-message" role="status"></p>
+              <div id="pointRedemptionList" class="record-list compact"></div>
+            </section>
+
             <section class="panel compact-panel">
               <div class="panel-heading">
                 <div>

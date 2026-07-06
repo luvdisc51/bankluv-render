@@ -84,6 +84,7 @@ function defaultState() {
     ],
     bills: [],
     subscriptions: [],
+    pointRedemptions: [],
   };
 }
 
@@ -96,6 +97,7 @@ function normalizeState(state) {
     transactions: [],
     bills: [],
     subscriptions: [],
+    pointRedemptions: [],
     ...state,
     settings: {
       managerPassword: "manager",
@@ -112,6 +114,7 @@ function normalizeState(state) {
     const key = card.accountId || "_none";
     const nextOrder = cardCounts.get(key) ?? 0;
     if (typeof card.active !== "boolean") card.active = true;
+    card.points = Math.max(0, Math.floor(Number(card.points || 0)));
     if (!Number.isFinite(Number(card.order))) card.order = nextOrder;
     cardCounts.set(key, nextOrder + 1);
     if (!card.createdAt) card.createdAt = new Date(Date.now() + index).toISOString();
@@ -132,6 +135,14 @@ function normalizeState(state) {
       });
   });
   normalized.bills = normalized.bills.filter((bill) => bill.status !== "paid");
+  normalized.pointRedemptions = normalized.pointRedemptions.map((redemption) => ({
+    active: true,
+    used: false,
+    createdAt: new Date().toISOString(),
+    ...redemption,
+    pointsCost: Math.max(0, Math.floor(Number(redemption.pointsCost || 0))),
+    value: roundMoney(redemption.value),
+  }));
   return normalized;
 }
 
@@ -160,6 +171,15 @@ function parsePercent(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 0;
   return Math.min(Math.max(parsed, 0), 100);
+}
+
+function makePointRedemptionCode(state) {
+  const usedCodes = new Set((state.pointRedemptions || []).map((entry) => String(entry.code || "")));
+  let code = "";
+  do {
+    code = `7777${Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join("")}`;
+  } while (usedCodes.has(code));
+  return code;
 }
 
 function mergeState(existingState, incomingState) {
@@ -194,6 +214,7 @@ function mergeState(existingState, incomingState) {
       ...oldCard,
       ...nextCard,
       balance: Number(oldCard.balance || 0),
+      points: Number(oldCard.points || 0),
       order: oldCard.order,
       active: oldCard.active === false ? false : nextCard.active !== false,
     };
@@ -207,6 +228,7 @@ function mergeState(existingState, incomingState) {
     transactions: mergeById(existing.transactions, incoming.transactions),
     bills: mergeById(existing.bills, incoming.bills).filter((bill) => bill.status !== "paid"),
     subscriptions: mergeById(existing.subscriptions, incoming.subscriptions),
+    pointRedemptions: mergeById(existing.pointRedemptions, incoming.pointRedemptions),
   });
 }
 
@@ -279,6 +301,7 @@ function chargeSubscription(state, subscription) {
   if (amount <= 0 || available < amount) return { ok: false, reason: "Insufficient credit" };
 
   card.balance = roundMoney(Number(card.balance || 0) + amount);
+  card.points = Math.max(0, Math.floor(Number(card.points || 0) + Math.round(amount * 100)));
   state.transactions.push({
     id: makeId("txn"),
     createdAt: new Date().toISOString(),
@@ -646,6 +669,36 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/api/point-redemptions" && req.method === "POST" && APP_MODE !== "customer") {
+      const body = JSON.parse(await readBody(req));
+      const state = readState();
+      const card = state.cards.find((entry) => entry.id === body.cardId && entry.active);
+      const account = card ? state.accounts.find((entry) => entry.id === card.accountId && entry.active !== false) : null;
+      const name = String(body.name || "Points reward").trim();
+      const pointsCost = Math.max(1, Math.floor(Number(body.pointsCost || 0)));
+      const value = roundMoney(body.value);
+      if (!card || !account || !name || pointsCost <= 0 || value <= 0) {
+        sendJson(res, 400, { error: "Point redemption needs an active card, name, points cost, and value." });
+        return;
+      }
+      state.pointRedemptions.push({
+        id: makeId("points"),
+        code: makePointRedemptionCode(state),
+        name,
+        cardId: card.id,
+        accountId: account.id,
+        pointsCost,
+        value,
+        active: true,
+        used: false,
+        usedAt: null,
+        createdAt: new Date().toISOString(),
+      });
+      writeState(state);
+      sendJson(res, 200, state);
+      return;
+    }
+
     if (url.pathname === "/api/reorder-account" && req.method === "POST" && APP_MODE !== "customer") {
       const body = JSON.parse(await readBody(req));
       const direction = Number(body.direction) < 0 ? -1 : 1;
@@ -764,6 +817,21 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: "Add at least one cart item before checkout." });
         return;
       }
+      const redemptionCode = String(body.pointRedemptionCode || "").replace(/\D/g, "");
+      const pointRedemption = redemptionCode
+        ? state.pointRedemptions.find((entry) => entry.active && !entry.used && String(entry.code || "") === redemptionCode)
+        : null;
+      const redemptionCard = pointRedemption ? state.cards.find((entry) => entry.id === pointRedemption.cardId && entry.active) : null;
+      if (redemptionCode && (!pointRedemption || !redemptionCard)) {
+        sendJson(res, 400, { error: "That points code was not found or was already used." });
+        return;
+      }
+      if (pointRedemption && Number(redemptionCard.points || 0) < Number(pointRedemption.pointsCost || 0)) {
+        sendJson(res, 400, { error: "That card does not have enough points for this redemption." });
+        return;
+      }
+      const pointRedemptionAmount = pointRedemption ? roundMoney(Math.min(Number(pointRedemption.value || 0), totals.total)) : 0;
+      const totalDue = roundMoney(totals.total - pointRedemptionAmount);
 
       const transaction = {
         id: makeId("txn"),
@@ -771,6 +839,20 @@ const server = http.createServer(async (req, res) => {
         merchant: merchantName,
         items,
         ...totals,
+        preRedemptionTotal: totals.total,
+        pointRedemptionAmount,
+        total: totalDue,
+        discountTotal: roundMoney(Number(totals.discountTotal || 0) + pointRedemptionAmount),
+        pointRedemption: pointRedemption
+          ? {
+              id: pointRedemption.id,
+              code: pointRedemption.code,
+              name: pointRedemption.name,
+              cardId: pointRedemption.cardId,
+              pointsCost: pointRedemption.pointsCost,
+              value: pointRedemptionAmount,
+            }
+          : null,
         method: "cash",
         cardId: null,
         accountId: null,
@@ -778,7 +860,11 @@ const server = http.createServer(async (req, res) => {
         status: "approved",
       };
 
-      if (method === "cash") {
+      if (totalDue <= 0) {
+        transaction.method = "points";
+        transaction.cardId = pointRedemption.cardId;
+        transaction.accountId = pointRedemption.accountId;
+      } else if (method === "cash") {
         const cashName = String(body.cashName || "").trim();
         if (!cashName) {
           sendJson(res, 400, { error: "Cash checkout requires a customer name." });
@@ -786,14 +872,14 @@ const server = http.createServer(async (req, res) => {
         }
         transaction.cashName = cashName;
       } else {
-        const payments = normalizeCardPayments(body, totals.total);
+        const payments = normalizeCardPayments(body, totalDue);
         const paymentTotal = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
         if (!payments.length) {
           sendJson(res, 400, { error: "Add at least one card for card checkout." });
           return;
         }
-        if (paymentTotal !== totals.total) {
-          sendJson(res, 400, { error: `Card split must add up to $${totals.total.toFixed(2)}.` });
+        if (paymentTotal !== totalDue) {
+          sendJson(res, 400, { error: `Card split must add up to $${totalDue.toFixed(2)}.` });
           return;
         }
 
@@ -876,6 +962,7 @@ const server = http.createServer(async (req, res) => {
         validatedPayments.forEach(({ card, account, amount }) => {
           if (card.type === "debit") account.balance = roundMoney(Number(account.balance || 0) - amount);
           else card.balance = roundMoney(Number(card.balance || 0) + amount);
+          card.points = Math.max(0, Math.floor(Number(card.points || 0) + Math.round(amount * 100)));
         });
 
         transaction.method = validatedPayments.length > 1 ? "split-card" : validatedPayments[0].card.type;
@@ -889,6 +976,12 @@ const server = http.createServer(async (req, res) => {
         }));
       }
 
+      if (pointRedemption) {
+        redemptionCard.points = Math.max(0, Math.floor(Number(redemptionCard.points || 0) - Number(pointRedemption.pointsCost || 0)));
+        pointRedemption.used = true;
+        pointRedemption.usedAt = new Date().toISOString();
+        pointRedemption.transactionId = transaction.id;
+      }
       state.transactions.push(transaction);
       state.cart = [];
       state.checkout = { ...(state.checkout || {}), orderDiscountPercent: 0 };
